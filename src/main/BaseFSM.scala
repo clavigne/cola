@@ -5,53 +5,64 @@ import jdk.incubator.concurrent.ScopedValue
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.LinkedBlockingQueue
 
-object BaseFSM:
-  // FSM stack
-  private val ctx: ScopedValue[List[BaseFSM]] = ScopedValue.newInstance()
-  def context: List[BaseFSM] = ctx.orElse(Nil)
-
 abstract class BaseFSM(val runnable: Runnable):
+  // Things to overload
   type Q
   type A
+  def handlers: ScopedValue.Carrier
 
-  import BaseFSM._
+  // Messages from the FSM
+  enum Message:
+    def send(): Unit = messages.put(this)
 
-  // State of the FSM, passed through the requests queue
-  enum State:
-    case Init
+    // call thread.start() to start the FSM
+    case Init(thread: Thread)
+
+    // nothing to do
+    case Running
+
+    // answer the query by completing a to resume the FSM
     case Request(q: Q, a: CompletableFuture[A])
+
+    // FSM is done
     case Done
+  end Message
 
-  val requests = new LinkedBlockingQueue[State]
-  requests.add(State.Init: State)
+  import Message._
 
-  val thread = Thread
+  val messages = new LinkedBlockingQueue[Message]
+
+  private val thread = Thread
     .ofVirtual()
     .unstarted(() =>
-      ScopedValue.where(BaseFSM.ctx, this +: BaseFSM.context, runnable)
-      requests.add(State.Done: State)
+      Running.send()
+      val carrier = handlers
+      carrier.run(runnable)
+      Done.send()
     )
+  Init(thread).send()
 
-  // called from virtual thread, unsafe
+  // Ask handler for a request.
   def ask(q: Q): CompletableFuture[A] = {
     val answer = new CompletableFuture[A]
-    val request = State.Request(q, answer)
-    requests.put(request)
+    Request(q, answer).send()
     answer
   }
 
+  // ---------------------------------------------------------------------------------------------
   // Return the state of the FSM. Note that requests should *not* be lost if the FSM is to
   // proceed.
-  def take(): State = requests.take()
+  def take(): Message = messages.take()
 
   // Step through the FSM, answering any queries using the given function.
   def join(f: Q => A): Unit = {
     while (true) {
       val state = take()
       state match {
-        case State.Init          => thread.start()
-        case State.Request(q, a) => a.complete(f(q))
-        case State.Done          => return
+        case Init(t)       => t.start()
+        case Running       =>
+        case Request(q, a) => a.complete(f(q))
+        case Done          => return
       }
     }
   }
