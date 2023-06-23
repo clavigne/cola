@@ -4,12 +4,13 @@ import java.lang.Thread
 import jdk.incubator.concurrent.ScopedValue
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.LinkedBlockingQueue
+import java.lang.InheritableThreadLocal
 
-abstract class BaseFSM(val runnable: Runnable):
+abstract class BaseFSM(f: () => Unit):
   // Things to overload
   type Q
   type A
-  def handlers: ScopedValue.Carrier
+  def handler: InheritableThreadLocal[BaseFSM]
 
   // Messages from the FSM
   enum Message:
@@ -26,20 +27,27 @@ abstract class BaseFSM(val runnable: Runnable):
 
     // FSM is done
     case Done
+
+    // FSM is terminated due to an uncaught exception
+    case UncaughtException(e: Throwable)
   end Message
 
   import Message._
 
   val messages = new LinkedBlockingQueue[Message]
 
-  private val thread = Thread
-    .ofVirtual()
-    .unstarted(() =>
-      Running.send()
-      val carrier = handlers
-      carrier.run(runnable)
-      Done.send()
-    )
+  private val thread = {
+    Thread
+      .ofVirtual()
+      .uncaughtExceptionHandler((_, e) => UncaughtException(e).send())
+      .unstarted(() => {
+        handler.set(this)
+        Running.send()
+        f()
+        handler.remove()
+        Done.send()
+      })
+  }
   Init(thread).send()
 
   // Ask handler for a request.
@@ -59,10 +67,11 @@ abstract class BaseFSM(val runnable: Runnable):
     while (true) {
       val state = take()
       state match {
-        case Init(t)       => t.start()
-        case Running       =>
-        case Request(q, a) => a.complete(f(q))
-        case Done          => return
+        case Init(t)              => t.start()
+        case Running              =>
+        case Request(q, a)        => a.complete(f(q))
+        case UncaughtException(e) => throw e
+        case Done                 => return
       }
     }
   }

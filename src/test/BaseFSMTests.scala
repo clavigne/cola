@@ -1,36 +1,36 @@
-//> using test.dep org.scalameta::munit::0.7.29
-//> using javaOpt --enable-preview --add-modules jdk.incubator.concurrent
 package cola
 
 import java.util.concurrent.CompletableFuture
-import jdk.incubator.concurrent.ScopedValue
+import java.lang.InheritableThreadLocal
 
 object BaseFSMTests:
-  class UnitFSM(r: Runnable) extends BaseFSM(r) {
+  type Handler = InheritableThreadLocal[BaseFSM]
+
+  class UnitFSM(f: () => Unit) extends BaseFSM(f) {
     type Q = Unit
     type A = Unit
-    def handlers = ScopedValue.where(UnitFSM.ctx, this)
+    def handler = UnitFSM.ctx.asInstanceOf[Handler]
   }
   object UnitFSM {
-    val ctx = ScopedValue.newInstance[UnitFSM]
+    val ctx = new InheritableThreadLocal[UnitFSM]()
   }
 
-  class UppercaseFSM(r: Runnable) extends BaseFSM(r) {
+  class UppercaseFSM(f: () => Unit) extends BaseFSM(f) {
     type Q = String
     type A = String
-    def handlers = ScopedValue.where(UppercaseFSM.ctx, this)
+    def handler = UppercaseFSM.ctx.asInstanceOf[Handler]
   }
   object UppercaseFSM {
-    val ctx = ScopedValue.newInstance[UppercaseFSM]
+    val ctx = new InheritableThreadLocal[UppercaseFSM]()
   }
 
-  class StringProviderFSM(r: Runnable) extends BaseFSM(r) {
+  class StringProviderFSM(f: () => Unit) extends BaseFSM(f) {
     type Q = Unit
     type A = String
-    def handlers = ScopedValue.where(StringProviderFSM.ctx, this)
+    def handler = StringProviderFSM.ctx.asInstanceOf[Handler]
   }
   object StringProviderFSM {
-    val ctx = ScopedValue.newInstance[StringProviderFSM]
+    val ctx = new InheritableThreadLocal[StringProviderFSM]()
   }
 
 class BaseFSMTests extends munit.FunSuite:
