@@ -6,26 +6,21 @@ object ScopedValuesTests:
   object Target:
     val tweak: ScopedValue[Int] = ScopedValue.newInstance
 
-  abstract class WithTarget(r: Runnable) {
+  abstract class WithTarget(r: Runnable):
     def name: String = ""
     def carrier: ScopedValue.Carrier
 
-    val t = Thread
-      .ofVirtual()
-      .unstarted(() => carrier.run(r))
+    val t = Thread.ofVirtual().unstarted(() => carrier.run(r))
 
-    def run() = {
+    def run() =
       t.start()
       t.join()
-    }
-  }
 
-  object WithTarget {
+  object WithTarget:
     val selfTarget: ScopedValue[WithTarget] = ScopedValue.newInstance
-  }
 
 class ScopedValuesTests extends munit.FunSuite:
-  import ScopedValuesTests._
+  import ScopedValuesTests.*
 
   test("scoped values where") {
     var out = 0
@@ -48,9 +43,7 @@ class ScopedValuesTests extends munit.FunSuite:
     var out = 0
     val carrier = ScopedValue.where(Target.tweak, 103)
     val runnable: Runnable = () => out = Target.tweak.get()
-    val t = Thread
-      .ofVirtual()
-      .unstarted(() => carrier.run(runnable))
+    val t = Thread.ofVirtual().unstarted(() => carrier.run(runnable))
     t.start()
     t.join()
     assertEquals(out, 103)
@@ -59,18 +52,19 @@ class ScopedValuesTests extends munit.FunSuite:
   test("carrier run in class ctor") {
     var out = 0
     val runnable: Runnable = () => out = Target.tweak.get()
-    new WithTarget(runnable) {
+    new WithTarget(runnable):
       def carrier = ScopedValue.where(Target.tweak, 101)
-    }.run()
+    .run()
     assertEquals(out, 101)
   }
 
   test("scoped value points at self") {
     var out = ""
     val runnable: Runnable = () => out = WithTarget.selfTarget.get().name
-    new WithTarget(runnable) {
+    new WithTarget(runnable):
       override def name = "this one"
       def carrier = ScopedValue.where(WithTarget.selfTarget, this)
-    }.run()
+    .run()
     assertEquals(out, "this one")
   }
+end ScopedValuesTests

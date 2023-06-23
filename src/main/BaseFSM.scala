@@ -6,11 +6,16 @@ import java.util.concurrent.CompletableFuture
 import java.util.concurrent.LinkedBlockingQueue
 import java.lang.InheritableThreadLocal
 
-abstract class BaseFSM(f: () => Unit):
+abstract class BaseFSM[T <: BaseFSM[T]](f: T => Unit):
+  self: T =>
+
   // Things to overload
   type Q
   type A
-  def handler: InheritableThreadLocal[BaseFSM]
+
+  // These always run before and after f, in the FSM's own thread. Use them to set handlers.
+  def onEntry(): Unit = ()
+  def onExit(): Unit = ()
 
   // Messages from the FSM
   enum Message:
@@ -18,9 +23,6 @@ abstract class BaseFSM(f: () => Unit):
 
     // call thread.start() to start the FSM
     case Init(thread: Thread)
-
-    // nothing to do
-    case Running
 
     // answer the query by completing a to resume the FSM
     case Request(q: Q, a: CompletableFuture[A])
@@ -32,30 +34,29 @@ abstract class BaseFSM(f: () => Unit):
     case UncaughtException(e: Throwable)
   end Message
 
-  import Message._
+  import Message.*
 
   val messages = new LinkedBlockingQueue[Message]
 
-  private val thread = {
+  private val thread =
     Thread
       .ofVirtual()
       .uncaughtExceptionHandler((_, e) => UncaughtException(e).send())
-      .unstarted(() => {
-        handler.set(this)
-        Running.send()
-        f()
-        handler.remove()
-        Done.send()
-      })
-  }
+      .unstarted {
+        () =>
+          onEntry()
+          try
+            f(this)
+            Done.send()
+          finally onExit()
+      }
   Init(thread).send()
 
   // Ask handler for a request.
-  def ask(q: Q): CompletableFuture[A] = {
+  def ask(q: Q): CompletableFuture[A] =
     val answer = new CompletableFuture[A]
     Request(q, answer).send()
     answer
-  }
 
   // ---------------------------------------------------------------------------------------------
   // Return the state of the FSM. Note that requests should *not* be lost if the FSM is to
@@ -63,15 +64,11 @@ abstract class BaseFSM(f: () => Unit):
   def take(): Message = messages.take()
 
   // Step through the FSM, answering any queries using the given function.
-  def join(f: Q => A): Unit = {
-    while (true) {
+  def join(f: Q => A): Unit =
+    while true do
       val state = take()
-      state match {
+      state match
         case Init(t)              => t.start()
-        case Running              =>
         case Request(q, a)        => a.complete(f(q))
         case UncaughtException(e) => throw e
         case Done                 => return
-      }
-    }
-  }
