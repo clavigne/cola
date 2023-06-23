@@ -1,0 +1,3 @@
+*.swp
+.bsp/
+.scala-build/
