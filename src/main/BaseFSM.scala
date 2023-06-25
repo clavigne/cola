@@ -6,17 +6,9 @@ import java.util.concurrent.CompletableFuture
 import java.util.concurrent.LinkedBlockingQueue
 import java.lang.InheritableThreadLocal
 
-/** The base effect type is basically just a tuple with query and answer types. */
-trait Effect:
-  type Q
-  type A
+abstract class BaseFSM[E <: BaseEffect](f: E ?=> Unit):
+  val instance: E // provides an instance of the effect, wired to this FSM
 
-type Handler[E <: Effect] = (e: E) => e.Q => e.A
-
-abstract class Context[-E <: Effect]:
-  def suspend[E1 <: E](e: E1)(q: e.Q): CompletableFuture[e.A]
-
-abstract class BaseFSM[E <: Effect](f: Context[E] => Unit) extends Context[E]:
   // These always run before and after f, in the FSM's own thread. Use them to set handlers.
   def onEntry(): Unit = ()
   def onExit(): Unit = ()
@@ -30,7 +22,7 @@ abstract class BaseFSM[E <: Effect](f: Context[E] => Unit) extends Context[E]:
     case Init(thread: Thread)
 
     // answer the query by completing a to resume the FSM
-    case Query[E1 <: E](val e: E1)(val q: e.Q, val a: CompletableFuture[e.A])
+    case Query(query: instance.A, answer: CompletableFuture[instance.B])
 
     // FSM is done
     case Done
@@ -51,16 +43,17 @@ abstract class BaseFSM[E <: Effect](f: Context[E] => Unit) extends Context[E]:
         () =>
           onEntry()
           try
-            f(this)
+            given E = instance
+            f
             Done.send()
           finally onExit()
       }
   Init(thread).send()
 
-  final override def suspend[E1 <: E](e: E1)(q: e.Q): CompletableFuture[e.A] =
-    val future = CompletableFuture[e.A]()
-    Query(e)(q, future).send()
-    future
+  def future(q: instance.A): CompletableFuture[instance.B] =
+    val todo = new CompletableFuture[instance.B]()
+    Query(q, todo).send()
+    todo
 
   // ---------------------------------------------------------------------------------------------
   // Return the state of the FSM. Note that requests should *not* be lost if the FSM is to
@@ -68,11 +61,16 @@ abstract class BaseFSM[E <: Effect](f: Context[E] => Unit) extends Context[E]:
   def take(): Message = messages.take()
 
   // Step through the FSM with a given generic handler.
-  def join(handler: Handler[E]): Unit =
+  def run(using handler: Handler[instance.type])(): Unit =
     while true do
       val state = take()
       state match
-        case Init(t)              => t.start()
-        case q: Query[?]          => q.a.complete(handler(q.e)(q.q))
+        case Init(t) => t.start()
+        case Query(q, a) =>
+          try
+            val result = handler(instance)(q)
+            a.complete(result)
+          catch
+            case e => a.completeExceptionally(e)
         case UncaughtException(e) => throw e
         case Done                 => return
