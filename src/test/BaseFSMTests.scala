@@ -3,13 +3,11 @@ package cola
 import java.util.concurrent.CompletableFuture
 import java.lang.InheritableThreadLocal
 
-
 // Base tests that aren't using syntactic sugar
 object BaseFSMTests:
   trait Async extends BaseEffect:
     type A = Unit
     type B = Unit
-
 
   object Async:
     given Handler[Async] = (_: Async) => (_: Unit) => ()
@@ -18,7 +16,6 @@ object BaseFSMTests:
     class async(f: Async ?=> Unit) extends BaseFSM[Async](f):
       override val instance = new Async:
         override def delayed(a: A) = future(a)
-
 
   trait Str extends BaseEffect:
     type A = String
@@ -38,9 +35,9 @@ class BaseFSMTests extends munit.FunSuite:
     import Async.*
     var result: String = ""
     async:
-        result = "ok"
+      result = "ok"
     .run()
-      
+
     assertEquals(result, "ok")
   }
 
@@ -48,12 +45,12 @@ class BaseFSMTests extends munit.FunSuite:
     import Async.*
     var result: String = ""
     var pauses = 0
-    given Handler[Async] = (_: Async) => (_: Unit) =>  pauses += 1
+    given Handler[Async] = (_: Async) => (_: Unit) => pauses += 1
 
     async:
-        pause()
-        result = "ok"
-        pause()
+      pause()
+      result = "ok"
+      pause()
     .run()
 
     assertEquals(result, "ok")
@@ -64,7 +61,7 @@ class BaseFSMTests extends munit.FunSuite:
     import Async.*
     var result = ""
     var pauses = 0
-    given Handler[Async] = (_: Async) => (_: Unit) =>  pauses += 1
+    given Handler[Async] = (_: Async) => (_: Unit) => pauses += 1
 
     async:
       async:
@@ -86,11 +83,9 @@ class BaseFSMTests extends munit.FunSuite:
     given Handler[Str] = (_: Str) => (s: String) => strings(s.toInt)
 
     str:
-      val a = Array(1,2,3).map(_.toString).map(morph)
-      result = a.mkString(" ") 
+      val a = Array(1, 2, 3).map(_.toString).map(morph)
+      result = a.mkString(" ")
     .run()
 
-    assertEquals(result, "one two three") 
+    assertEquals(result, "one two three")
   }
-
-

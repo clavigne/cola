@@ -70,7 +70,6 @@ abstract class BaseFSM[E <: BaseEffect](f: E ?=> Unit):
           try
             val result = handler(instance)(q)
             a.complete(result)
-          catch
-            case e => a.completeExceptionally(e)
+          catch case e => a.completeExceptionally(e)
         case UncaughtException(e) => throw e
         case Done                 => return
