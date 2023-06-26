@@ -4,7 +4,7 @@ import java.util.concurrent.CompletableFuture
 import java.lang.InheritableThreadLocal
 
 // Base tests that aren't using syntactic sugar
-object BaseFSMTests:
+object BasicFSMTests:
   trait Async extends BaseEffect:
     type A = Unit
     type B = Unit
@@ -12,10 +12,7 @@ object BaseFSMTests:
   object Async:
     given Handler[Async] = (_: Async) => (_: Unit) => ()
     def pause()(using Async): Unit = summon[Async].get(())
-
-    class async(f: Async ?=> Unit) extends BaseFSM[Async](f):
-      override val instance = new Async:
-        override def delayed(a: A) = future(a)
+    def async[R](f: Async ?=> R) = new FSM(f) with Async
 
   trait Str extends BaseEffect:
     type A = String
@@ -23,39 +20,34 @@ object BaseFSMTests:
 
   object Str:
     def morph(str: String)(using Str): String = summon[Str].get(str)
+    def str[R](f: Str ?=> R) = new FSM(f) with Str
 
-    class str(f: Str ?=> Unit) extends BaseFSM[Str](f):
-      override val instance = new Str:
-        override def delayed(a: A) = future(a)
+class BasicFSMTests extends munit.FunSuite:
+  import BasicFSMTests.*
 
-class BaseFSMTests extends munit.FunSuite:
-  import BaseFSMTests.*
-
-  test("join on FSM without pauses") {
+  test("join on FSM without pauses"):
     import Async.*
-    var result: String = ""
-    async:
-      result = "ok"
-    .run()
+    val result: String =
+      async:
+        "ok"
+      .eval
 
     assertEquals(result, "ok")
-  }
 
-  test("join on FSM with pauses") {
+  test("join on FSM with pauses"):
     import Async.*
-    var result: String = ""
     var pauses = 0
     given Handler[Async] = (_: Async) => (_: Unit) => pauses += 1
 
-    async:
+    val result = async:
       pause()
-      result = "ok"
+      val out = "ok"
       pause()
-    .run()
+      out
+    .eval
 
     assertEquals(result, "ok")
     assertEquals(pauses, 2)
-  }
 
   test("test nested fsms") {
     import Async.*
@@ -67,10 +59,10 @@ class BaseFSMTests extends munit.FunSuite:
       async:
         pause()
         result = "ok"
-      .run()
+      .eval
       pause()
       pause()
-    .run()
+    .eval
 
     assertEquals(result, "ok")
     assertEquals(pauses, 3)
@@ -78,14 +70,13 @@ class BaseFSMTests extends munit.FunSuite:
 
   test("test string transformer") {
     import Str.*
-    var result = ""
     val strings = Array("zero", "one", "two", "three")
     given Handler[Str] = (_: Str) => (s: String) => strings(s.toInt)
 
-    str:
+    val result = str:
       val a = Array(1, 2, 3).map(_.toString).map(morph)
-      result = a.mkString(" ")
-    .run()
+      a.mkString(" ")
+    .eval
 
     assertEquals(result, "one two three")
   }

@@ -1,19 +1,15 @@
 package cola
 
 import java.lang.Thread
-import jdk.incubator.concurrent.ScopedValue
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.LinkedBlockingQueue
-import java.lang.InheritableThreadLocal
 
-abstract class BaseFSM[E <: BaseEffect](f: E ?=> Unit):
-  val instance: E // provides an instance of the effect, wired to this FSM
-
-  // These always run before and after f, in the FSM's own thread. Use them to set handlers.
+abstract class FSM[E <: BaseEffect, R](f: E ?=> R):
+  self: FSM[E, R] with E =>
+  // These always run before and after f, in the FSM's own thread.
   def onEntry(): Unit = ()
   def onExit(): Unit = ()
 
-  // Queries
   // Messages from the FSM
   enum Message:
     def send(): Unit = messages.put(this)
@@ -22,10 +18,10 @@ abstract class BaseFSM[E <: BaseEffect](f: E ?=> Unit):
     case Init(thread: Thread)
 
     // answer the query by completing a to resume the FSM
-    case Query(query: instance.A, answer: CompletableFuture[instance.B])
+    case Query(query: A, answer: CompletableFuture[B])
 
     // FSM is done
-    case Done
+    case Done(result: R)
 
     // FSM is terminated due to an uncaught exception
     case UncaughtException(e: Throwable)
@@ -43,17 +39,20 @@ abstract class BaseFSM[E <: BaseEffect](f: E ?=> Unit):
         () =>
           onEntry()
           try
-            given E = instance
-            f
-            Done.send()
+            given E = this
+            val result = f
+            Done(result).send()
           finally onExit()
       }
   Init(thread).send()
 
-  def future(q: instance.A): CompletableFuture[instance.B] =
-    val todo = new CompletableFuture[instance.B]()
+  // Called from the virtual thread
+  override def suspend(q: A): CompletableFuture[B] =
+    val todo = new CompletableFuture[B]()
     Query(q, todo).send()
     todo
+
+  override def get(q: A): B = suspend(q).get()
 
   // ---------------------------------------------------------------------------------------------
   // Return the state of the FSM. Note that requests should *not* be lost if the FSM is to
@@ -61,15 +60,18 @@ abstract class BaseFSM[E <: BaseEffect](f: E ?=> Unit):
   def take(): Message = messages.take()
 
   // Step through the FSM with a given generic handler.
-  def run(using handler: Handler[instance.type])(): Unit =
+  def eval(using handler: Handler[E]): R =
     while true do
       val state = take()
       state match
         case Init(t) => t.start()
         case Query(q, a) =>
           try
-            val result = handler(instance)(q)
+            val result = handler(this)(q)
             a.complete(result)
           catch case e => a.completeExceptionally(e)
         case UncaughtException(e) => throw e
-        case Done                 => return
+        case Done(r)              => return r
+
+    // should never happen
+    throw new RuntimeException("exited FSM loop without a Done message")
