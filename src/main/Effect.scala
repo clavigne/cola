@@ -18,6 +18,10 @@ trait Effect0[B1] extends BaseEffect:
   def suspend(): CompletableFuture[B] = suspend(())
   def get(): B = get(())
 
+trait Effect1[A1, B1] extends BaseEffect:
+  type A = A1
+  type B = B1
+
 // Handlers handle effects in the caller thread
 type Handler[E <: BaseEffect] = (effect: E) => (effect.A) => effect.B
 
